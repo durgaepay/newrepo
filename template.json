@@ -1,0 +1,234 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "type": "string"
+        },
+        "networkInterfaceName": {
+            "type": "string"
+        },
+        "networkSecurityGroupId": {
+            "type": "string"
+        },
+        "subnetName": {
+            "type": "string"
+        },
+        "virtualNetworkId": {
+            "type": "string"
+        },
+        "virtualMachineName": {
+            "type": "string"
+        },
+        "virtualMachineRG": {
+            "type": "string"
+        },
+        "osDiskType": {
+            "type": "string"
+        },
+        "virtualMachineSize": {
+            "type": "string"
+        },
+        "adminUsername": {
+            "type": "string"
+        },
+        "adminPublicKey": {
+            "type": "secureString"
+        },
+        "diagnosticsStorageAccountName": {
+            "type": "string"
+        },
+        "diagnosticsStorageAccountId": {
+            "type": "string"
+        },
+        "workspaceId": {
+            "type": "string"
+        },
+        "workspaceKey": {
+            "type": "string"
+        },
+        "applicationName":{
+            "type": "string"
+        },
+        "releaseId":{
+            "type": "string"
+        },
+        "AzureDevopsOrganisation":{
+            "type": "string"
+        },
+        "TeamProject":{
+            "type": "string"
+        },
+        "DeploymentGroup":{
+            "type": "string"
+        },
+        "AzureDevopsPATToken":{
+            "type": "string"
+        },
+        "role": {
+            "type": "string"
+        },
+        "vmCount": {
+            "type": "int"
+        }
+    },
+    "variables": {
+        "nsgId": "[parameters('networkSecurityGroupId')]",
+        "vnetId": "[parameters('virtualNetworkId')]",
+        "subnetRef": "[concat(variables('vnetId'), '/subnets/', parameters('subnetName'))]"
+    },
+    "resources": [
+        {
+            "name": "[concat(parameters('networkInterfaceName'), '_', copyIndex(1), '-nic')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2019-07-01",
+            "location": "[parameters('location')]",
+            "copy": {
+                "name": "nicLoop",
+                "count": "[parameters('vmCount')]"
+            },
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            },
+                            "privateIPAllocationMethod": "Dynamic"
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[variables('nsgId')]"
+                }
+            },
+            "tags": {
+                "Role": "[parameters('role')]",
+                "Application": "[parameters('applicationName')]",
+                "ReleaseId": "[parameters('releaseId')]",
+                "Vm": "[concat('group-',copyIndex(1))]"
+            }
+        },
+        {
+            "name": "[concat(parameters('virtualMachineName'), '_', copyIndex(1))]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2019-07-01",
+            "location": "[parameters('location')]",
+            "copy": {
+                "name": "vmLoop",
+                "count": "[parameters('vmCount')]"
+            },
+            "dependsOn": [
+                "nicLoop"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('virtualMachineSize')]"
+                },
+                "storageProfile": {
+                    "osDisk": {
+                        "createOption": "fromImage",
+                        "managedDisk": {
+                            "storageAccountType": "[parameters('osDiskType')]"
+                        }
+                    },
+                    "imageReference": {
+                        "publisher": "Canonical",
+                        "offer": "UbuntuServer",
+                        "sku": "18.04-LTS",
+                        "version": "latest"
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('networkInterfaceName'), '_', copyIndex(1), '-nic'))]"
+                        }
+                    ]
+                },
+                "osProfile": {
+                    "computerName": "[parameters('virtualMachineName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": true,
+                        "ssh": {
+                            "publicKeys": [
+                                {
+                                    "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                                    "keyData": "[parameters('adminPublicKey')]"
+                                }
+                            ]
+                        }
+                    }
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[concat('https://', parameters('diagnosticsStorageAccountName'), '.blob.core.windows.net/')]"
+                    }
+                }
+            },
+            "tags": {
+                "Role": "[parameters('role')]",
+                "Application": "[parameters('applicationName')]",
+                "ReleaseId": "[parameters('releaseId')]",
+                "Vm": "[concat('group-',copyIndex(1))]"
+            },
+             "resources": [
+                {
+                    "type": "Microsoft.Compute/virtualMachines/extensions",
+                    "name": "[concat(parameters('virtualMachineName'), '_', copyIndex(1), '/Microsoft.EnterpriseCloud.Monitoring')]",
+                    "apiVersion": "2017-03-30",
+                    "location": "[parameters('location')]",
+                    "dependsOn": [
+                        "[concat('Microsoft.Compute/virtualMachines/', parameters('virtualMachineName'), '_', copyIndex(1))]"
+                    ],
+                    "properties": {
+                        "publisher": "Microsoft.EnterpriseCloud.Monitoring",
+                        "type": "OmsAgentForLinux",
+                        "typeHandlerVersion": "1.6",
+                        "autoUpgradeMinorVersion": true,
+                        "settings": {
+                            "workspaceId": "[parameters('workspaceId')]"
+                        },
+                        "protectedSettings": {
+                            "workspaceKey": "[parameters('workspaceKey')]"
+                        }
+                    }
+                },
+                {
+                    "name": "[concat(parameters('virtualMachineName'), '_', copyIndex(1), '/TeamServicesAgent')]",
+                    "type": "Microsoft.Compute/virtualMachines/extensions",
+                    "location": "[parameters('location')]",
+                    "apiVersion": "2015-06-15",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Compute/virtualMachines/', concat(parameters('virtualMachineName'), '_', copyIndex(1)))]"
+                    ],
+                    "properties": {
+                    "publisher": "Microsoft.VisualStudio.Services",
+                    "type": "TeamServicesAgentLinux",
+                    "typeHandlerVersion": "1.0",
+                    "autoUpgradeMinorVersion": true,
+                    "settings": {
+                        "VSTSAccountName": "[parameters('AzureDevopsOrganisation')]",
+                        "TeamProject": "[parameters('TeamProject')]",
+                        "DeploymentGroup": "[parameters('DeploymentGroup')]",
+                        "AgentName": "[concat(parameters('virtualMachineName'), '_' ,copyIndex(1))]",
+                        "Tags": "[concat(parameters('releaseId'),',',parameters('role'),',',parameters('applicationName'),',',concat('group-',copyIndex(1)))]"
+                    },
+                    "protectedSettings": {
+                    "PATToken": "[parameters('AzureDevopsPATToken')]"
+                    }
+                }
+                }
+            ]
+        }
+    ],
+    "outputs": {
+        "adminUsername": {
+            "type": "string",
+            "value": "[parameters('adminUsername')]"
+        }
+    }
+}
